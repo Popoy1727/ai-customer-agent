@@ -236,9 +236,9 @@ function uiHTML(shopDefault = "") {
     </div>
 
     <p class="note">
-      ✅ Step 1: Click <b>Install/Auth</b> first (token needed).<br/>
-      ✅ Step 2: Click <b>Load Customers</b> to show the table.<br/>
-      ✅ Step 3: Click <b>Download CSV</b> to export.
+      ✅ Step 1: Click <b>Install/Auth</b><br/>
+      ✅ Step 2: Click <b>Load Customers</b><br/>
+      ✅ Step 3: Click <b>Download CSV</b>
     </p>
 
     <div id="status"></div>
