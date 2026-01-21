@@ -37,10 +37,8 @@ if (missing.length) {
   console.log("❌ Missing env vars:", missing.join(", "));
 }
 
-// ✅ If SHOPIFY_APP_URL ends with "/" remove it
+// ✅ remove trailing slash
 const APP_URL = (SHOPIFY_APP_URL || "").replace(/\/$/, "");
-
-// ✅ Render is HTTPS, Shopify requires SameSite=None;Secure in many cases (Admin iframe flow)
 const IS_HTTPS = APP_URL.startsWith("https://");
 
 // ✅ In-memory token store (use DB in production)
@@ -48,7 +46,10 @@ const TOKENS = new Map();
 
 // ---------- helpers ----------
 function isValidShop(shop) {
-  return typeof shop === "string" && /^[a-zA-Z0-9][a-zA-Z0-9\-]*\.myshopify\.com$/.test(shop);
+  return (
+    typeof shop === "string" &&
+    /^[a-zA-Z0-9][a-zA-Z0-9\-]*\.myshopify\.com$/.test(shop)
+  );
 }
 
 // ✅ Shopify HMAC verify (hex compare)
@@ -76,9 +77,9 @@ function verifyHmac(query) {
   return crypto.timingSafeEqual(a, b);
 }
 
-// ✅ Build Install URL with EXACT redirect_uri that must be whitelisted
+// ✅ EXACT redirect_uri that must be whitelisted in Shopify Dev Dashboard
 function buildInstallUrl(shop, state) {
-  const redirectUri = `${APP_URL}/auth/callback`; // MUST MATCH Dev Dashboard Redirect URL
+  const redirectUri = `${APP_URL}/auth/callback`;
   return (
     `https://${shop}/admin/oauth/authorize` +
     `?client_id=${SHOPIFY_API_KEY}` +
@@ -137,6 +138,28 @@ app.get("/health", (req, res) => {
     tokensCount: TOKENS.size,
     missingEnv: missing,
   });
+});
+
+/**
+ * ✅ IMPORTANT FIX: Escape iframe before OAuth
+ * Shopify admin loads your app in an iframe. OAuth/login pages can't be iframed.
+ * This route forces redirect OUTSIDE iframe (top window).
+ */
+app.get("/exitiframe", (req, res) => {
+  const shop = (req.query.shop || "").toString().trim();
+  if (!shop) return res.status(400).send("Missing shop");
+
+  res.setHeader("Content-Type", "text/html");
+  res.send(`
+    <script>
+      var target = "/auth?shop=${encodeURIComponent(shop)}";
+      if (window.top === window.self) {
+        window.location.href = target;
+      } else {
+        window.top.location.href = target;
+      }
+    </script>
+  `);
 });
 
 // ---------- UI ----------
@@ -225,10 +248,11 @@ function uiHTML(shopDefault = "") {
     return document.getElementById("shop").value.trim();
   }
 
+  // ✅ IMPORTANT: use /exitiframe (fix accounts.shopify.com refused to connect)
   function install() {
     const shop = getShop();
     if(!shop) return alert("Please Put Shop Domain.");
-    window.location.href = "/auth?shop=" + encodeURIComponent(shop);
+    window.location.href = "/exitiframe?shop=" + encodeURIComponent(shop);
   }
 
   async function loadCustomers() {
@@ -319,7 +343,7 @@ app.get("/auth", (req, res) => {
 
   const state = crypto.randomBytes(16).toString("hex");
 
-  // ✅ cookie must work inside Shopify/admin redirects; for HTTPS use SameSite=None;Secure
+  // ✅ cookie for state
   res.cookie("shopify_oauth_state", state, {
     httpOnly: true,
     secure: IS_HTTPS,
@@ -333,7 +357,9 @@ app.get("/auth/callback", async (req, res) => {
   const { shop, code, state } = req.query;
 
   if (!shop || !code || !state) {
-    return res.status(400).send("Missing shop/code/state (Don't open /auth/callback manually. Use Install/Auth.)");
+    return res
+      .status(400)
+      .send("Missing shop/code/state (Don't open /auth/callback manually. Use Install/Auth.)");
   }
 
   const cookieState = req.cookies?.shopify_oauth_state;
