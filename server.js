@@ -52,7 +52,10 @@ function isValidShop(shop) {
   );
 }
 
-// ✅ Shopify HMAC verify (hex compare)
+/**
+ * ✅ Shopify HMAC verify (hex compare)
+ * NOTE: Shopify query is "hex string" => compare buffers as hex.
+ */
 function verifyHmac(query) {
   const { hmac, signature, ...rest } = query;
   if (!hmac) return false;
@@ -77,9 +80,30 @@ function verifyHmac(query) {
   return crypto.timingSafeEqual(a, b);
 }
 
+/**
+ * ✅ IMPORTANT FIX for redirect_uri not whitelisted
+ * We MUST send EXACT redirect_uri that is whitelisted in Shopify Dev Dashboard.
+ *
+ * If running local:   http://localhost:3001/auth/callback
+ * If running Render:  https://ai-customer-agent.onrender.com/auth/callback
+ *
+ * So: whitelist BOTH in Dev Dashboard Redirect URLs.
+ */
+function getRedirectUri(req) {
+  // use env APP_URL always (most stable)
+  // return `${APP_URL}/auth/callback`;
+
+  // optional: auto-detect host if you want (but env is safer):
+  // const proto = req.protocol; // needs trust proxy
+  // return `${proto}://${req.get("host")}/auth/callback`;
+
+  return `${APP_URL}/auth/callback`;
+}
+
 // ✅ EXACT redirect_uri that must be whitelisted in Shopify Dev Dashboard
-function buildInstallUrl(shop, state) {
-  const redirectUri = `${APP_URL}/auth/callback`;
+function buildInstallUrl(req, shop, state) {
+  const redirectUri = getRedirectUri(req);
+
   return (
     `https://${shop}/admin/oauth/authorize` +
     `?client_id=${SHOPIFY_API_KEY}` +
@@ -134,16 +158,18 @@ app.get("/health", (req, res) => {
     port: PORT,
     appUrl: APP_URL,
     scopes: SHOPIFY_SCOPES,
-    redirectUri: `${APP_URL}/auth/callback`,
+    redirectUri: getRedirectUri(req),
     tokensCount: TOKENS.size,
     missingEnv: missing,
+    serverHost: req.get("host"),
+    serverProto: req.protocol,
   });
 });
 
 /**
  * ✅ IMPORTANT FIX: Escape iframe before OAuth
- * Shopify admin loads your app in an iframe. OAuth/login pages can't be iframed.
- * This route forces redirect OUTSIDE iframe (top window).
+ * Shopify admin loads your app in an iframe.
+ * OAuth/login pages can't be iframed -> accounts.shopify.com refused to connect
  */
 app.get("/exitiframe", (req, res) => {
   const shop = (req.query.shop || "").toString().trim();
@@ -248,7 +274,7 @@ function uiHTML(shopDefault = "") {
     return document.getElementById("shop").value.trim();
   }
 
-  // ✅ IMPORTANT: use /exitiframe (fix accounts.shopify.com refused to connect)
+  // ✅ IMPORTANT: use /exitiframe
   function install() {
     const shop = getShop();
     if(!shop) return alert("Please Put Shop Domain.");
@@ -344,13 +370,15 @@ app.get("/auth", (req, res) => {
   const state = crypto.randomBytes(16).toString("hex");
 
   // ✅ cookie for state
+  // - HTTPS: sameSite none + secure true
+  // - Local: lax + secure false
   res.cookie("shopify_oauth_state", state, {
     httpOnly: true,
     secure: IS_HTTPS,
     sameSite: IS_HTTPS ? "none" : "lax",
   });
 
-  return res.redirect(buildInstallUrl(shop, state));
+  return res.redirect(buildInstallUrl(req, shop, state));
 });
 
 app.get("/auth/callback", async (req, res) => {
@@ -498,4 +526,5 @@ app.listen(PORT, () => {
   console.log(`✅ Server running on http://localhost:${PORT}`);
   console.log(`✅ APP_URL: ${APP_URL}`);
   console.log(`✅ Redirect URI: ${APP_URL}/auth/callback`);
+  console.log("✅ DEPLOY CHECK:", new Date().toISOString());
 });
