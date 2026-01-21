@@ -214,7 +214,7 @@ function uiHTML(shopDefault = "") {
 </head>
 <body>
   <div class="box">
-    <h2>📌 AI Customer Agent - Customer Contact List <span class="pill">UI</span></h2>
+    <h2>📌 AI Customer Agent - Customer Information List <span class="pill">UI</span></h2>
 
     <div class="row">
       <div>
